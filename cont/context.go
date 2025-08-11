@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type Post struct {
@@ -21,11 +22,30 @@ var (
 	postsMu sync.Mutex
 )
 
+type Logger struct {
+	RespHandler http.Handler
+}
+
+func (l *Logger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	l.RespHandler.ServeHTTP(w, r)
+	log.Printf("The duration taken is %v to complete the request ", time.Since(start))
+
+}
+
+func NewMux(handlerTobeWrapper http.Handler) *Logger {
+	return &Logger{handlerTobeWrapper}
+}
+
 func main() {
+	mux := http.NewServeMux()
 	http.HandleFunc("/posts", postsHandler)
 	http.HandleFunc("/posts/", postHandler)
 	fmt.Println("The server is up and running on Port 8000")
-	log.Fatal(http.ListenAndServe(":8000", nil))
+	wrappedMux := NewMux(mux)
+	log.Fatal(http.ListenAndServe(":8000", wrappedMux))
+
 }
 
 func postsHandler(w http.ResponseWriter, r *http.Request) {
