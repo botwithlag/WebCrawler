@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"strconv"
+	"net/url"
 	"sync"
 	"time"
+
+	"golang.org/x/net/html"
 )
 
 type vehicle struct {
@@ -93,21 +95,25 @@ func routineexample(s string) {
 
 var wg sync.WaitGroup
 var mut sync.Mutex
+var visited = make(map[string]bool)
+var semaphore = make(chan struct{}, 10)
 
 func main() {
 
-	chanel := make(chan string, 10)
-	go func() {
-		for i := 0; i < 10; i++ {
-			chanel <- strconv.Itoa(i)
-		}
-		close(chanel)
-	}()
-	wg.Add(10)
-	for i := 0; i < 10; i++ {
-		go chanelremover(chanel)
-	}
-	wg.Wait()
+	// chanel := make(chan string, 10)
+	// go func() {
+	// 	for i := 0; i < 10; i++ {
+	// 		chanel <- strconv.Itoa(i)
+	// 	}
+	// 	close(chanel)
+	// }()
+	// wg.Add(10)
+	// for i := 0; i < 10; i++ {
+	// 	go chanelremover(chanel)
+	// }
+	// wg.Wait()
+
+	webCrawler("https://google.com", 2)
 
 	// recieptorders(orders)
 	// var intptr *int
@@ -153,28 +159,102 @@ func chanelremover(chanel chan string) {
 
 }
 
-func webCrawler(starturl string, depth int8) {
-	if depth == 0 {
-		return
-	}
-
+func webCrawler(starturl string, depth int) {
+	fmt.Println("Currently Crawling := ", starturl)
+	visited[starturl] = true
 	//http get response
+
 	resp, err := http.Get(starturl)
 	if err != nil {
 		fmt.Println("OOPS unable to get ", starturl)
 	}
+
+	links := linkcollector(resp, starturl)
 	defer resp.Body.Close()
-	links := linkcollector(resp)
 
 	for _, link := range links {
 		wg.Add(1)
-		go webCrawler(link, depth-1)
+		go crawl(link, depth-1)
+
 	}
+	wg.Wait()
 
 	// linkcollector
 
 }
+func crawl(link string, depth int) {
 
-func linkcollector(resp *http.Response) (links []string) {
-	return
+	if depth == 0 {
+		fmt.Println("Depth Reached -> 0")
+		return
+
+	}
+
+	mut.Lock()
+	if visited[link] {
+		mut.Unlock()
+		fmt.Println("Already Visited this")
+		return
+	}
+	fmt.Println("Currently Crawling := ", link)
+	visited[link] = true
+	mut.Unlock()
+	wg.Done()
+
+	//http get response
+	resp, err := http.Get(link)
+	if err != nil {
+		fmt.Println("OOPS unable to get ", link)
+		return
+	}
+	defer resp.Body.Close()
+	links := linkcollector(resp, link)
+
+	for _, url := range links {
+		wg.Add(1)
+		go crawl(url, depth-1)
+
+	}
+
+}
+func linkcollector(resp *http.Response, link string) []string {
+	links := []string{}
+	tokenizer := html.NewTokenizer(resp.Body)
+	for {
+		tt := tokenizer.Next()
+		switch tt {
+		case html.ErrorToken:
+			return links
+		case html.StartTagToken, html.EndTagToken:
+			t := tokenizer.Token()
+			if t.Data != "a" {
+				continue
+			}
+			for _, atr := range t.Attr {
+				if atr.Key == "href" {
+					href := atr.Val
+					url := resolveUrl(href, link)
+					if url != "" {
+						fmt.Println("Link one", link, href)
+						links = append(links, url)
+					}
+
+				}
+			}
+		}
+	}
+}
+
+func resolveUrl(href, link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		fmt.Println(err)
+	}
+	url, err := u.Parse(href)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	return url.String()
+
 }
